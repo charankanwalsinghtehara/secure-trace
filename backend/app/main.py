@@ -4,10 +4,12 @@ import json
 import os
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.services import at_rest, auth, demo_crypto, llm, watermark
@@ -422,3 +424,8 @@ def admin_status(user: dict[str, str] = Depends(admin_user)) -> dict[str, object
         "recipients": len(data["recipients"]),
         "ledger": ledger.status(),
     }
+
+
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

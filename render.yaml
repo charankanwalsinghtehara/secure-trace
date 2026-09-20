@@ -1,17 +1,14 @@
 services:
   - type: web
-    name: securetrace-api
+    name: securetrace
     runtime: python
     region: oregon
     plan: free
-    rootDir: backend
-    buildCommand: pip install -e .
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
+    buildCommand: pip install -e ./backend && npm install --prefix frontend && npm run build --prefix frontend
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
-      - key: CORS_ALLOWED_ORIGINS
-        value: https://securetrace-web.onrender.com
       - key: SECUREDOC_JWT_SECRET
         generateValue: true
       - key: CRYPTATRACE_LLM_URL
@@ -20,12 +17,3 @@ services:
         value: llama3.2
       - key: CRYPTATRACE_LLM_TIMEOUT
         value: "90"
-  - type: web
-    name: securetrace-web
-    runtime: node
-    rootDir: frontend
-    buildCommand: npm install && npm run build
-    startCommand: npx --yes serve -s dist -l $PORT
-    envVars:
-      - key: VITE_API_URL
-        value: https://securetrace-api.onrender.com
