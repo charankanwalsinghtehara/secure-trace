@@ -20,9 +20,8 @@ services:
         value: llama3.2
       - key: CRYPTATRACE_LLM_TIMEOUT
         value: "90"
-
-staticSites:
-  - name: securetrace-web
+  - type: static
+    name: securetrace-web
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
