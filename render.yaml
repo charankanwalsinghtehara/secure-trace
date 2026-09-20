@@ -25,7 +25,7 @@ services:
     runtime: node
     rootDir: frontend
     buildCommand: npm install && npm run build
-    startCommand: npx serve -s dist -l $PORT
+    startCommand: npx --yes serve -s dist -l $PORT
     envVars:
       - key: VITE_API_URL
         value: https://securetrace-api.onrender.com
