@@ -3,7 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const API = '';
+const API = import.meta.env.VITE_API_URL ?? '';
 type Auth = { access_token: string; user: { user_id: string; email: string; role: string } };
 type Recipient = { recipient_id: string; name: string; private_key?: string; active?: boolean };
 type Document = { document_id: string; name: string; document_hash: string };
