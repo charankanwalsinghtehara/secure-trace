@@ -9,18 +9,19 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app.services import at_rest, auth, demo_crypto, watermark
+from app.services import at_rest, auth, demo_crypto, llm, watermark
 from app.services.ledger import LocalLedger
 from app.services.storage import JsonStore
 
 app = FastAPI(
-    title="CryptaTrace Private Document Network API",
+    title="SecureTrace Private Document Network API",
     version="0.1.0",
     description="Offline-first API for cryptographically verifiable document distribution.",
 )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?",
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
@@ -71,6 +72,10 @@ class WatermarkLookup(BaseModel):
     content_base64: str = Field(min_length=1)
 
 
+class AnalysisRequest(BaseModel):
+    instruction: str | None = Field(default=None, max_length=1000)
+
+
 def document_bytes(document: dict[str, object]) -> bytes:
     if document.get("content_encrypted"):
         return at_rest.decrypt_bytes(str(document["content_encrypted"]))
@@ -108,6 +113,7 @@ def modules() -> list[ModuleStatus]:
         ModuleStatus(name="watermark", status="active", note="Binary forensic frame with extraction and integrity checks"),
         ModuleStatus(name="ledger", status="active", note="Offline append-only hash-chained ledger"),
         ModuleStatus(name="postgresql", status="adapter-ready", note="JSON store active for demo; PostgreSQL adapter is the deployment target"),
+        ModuleStatus(name="llm", status="local-adapter", note=f"{llm.LLMConfig().model} via {llm.LLMConfig().base_url}"),
     ]
 
 
@@ -164,10 +170,46 @@ def download_document(document_id: str, user: dict[str, str] = Depends(current_u
     return {"name": document["name"], "content_base64": base64.b64encode(document_bytes(document)).decode("ascii")}
 
 
+@app.post("/api/v1/documents/{document_id}/analyze")
+def analyze_document(document_id: str, request: AnalysisRequest = AnalysisRequest(), user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
+    document = store.read()["documents"].get(document_id)
+    if not document or document.get("user_id") != user["user_id"]:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        text = document_bytes(document).decode("utf-8")[:100_000]
+    except UnicodeDecodeError as error:
+        raise HTTPException(status_code=415, detail="The configured local analyst currently accepts UTF-8 text documents") from error
+    prompt_text = f"{request.instruction}\n\n{text}" if request.instruction else text
+    try:
+        result = llm.analyze(prompt_text, document["name"])
+    except llm.LocalLLMError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    analysis_id = secrets.token_hex(16)
+    analysis_hash = hashlib.sha3_256(result.encode("utf-8")).hexdigest()
+    event = {"event_type": "llm_analysis", "analysis_id": analysis_id, "document_id": document_id, "document_hash": document["document_hash"], "analysis_hash": analysis_hash, "model": llm.LLMConfig().model, "user_id": user["user_id"], "created_at": datetime.now(timezone.utc).isoformat()}
+    entry = ledger.append(event)
+
+    def save(data: dict) -> None:
+        data["analyses"].append({**event, "transaction_id": entry["transaction_id"], "result": result})
+
+    store.update(save)
+    return {"analysis_id": analysis_id, "document_id": document_id, "document_hash": document["document_hash"], "analysis_hash": analysis_hash, "model": event["model"], "transaction_id": entry["transaction_id"], "result": result}
+
+
+@app.get("/api/v1/llm/status")
+def llm_status(user: dict[str, str] = Depends(current_user)) -> dict[str, object]:
+    return llm.status()
+
+
 @app.get("/api/v1/recipients")
-def list_recipients(user: dict[str, str] = Depends(current_user)) -> list[dict[str, str]]:
+def list_recipients(user: dict[str, str] = Depends(current_user)) -> list[dict[str, object]]:
     return [
-        {key: recipient[key] for key in ("recipient_id", "name", "algorithm", "active")}
+        {
+            "recipient_id": recipient.get("recipient_id"),
+            "name": recipient.get("name"),
+            "algorithm": recipient.get("algorithm"),
+            "active": recipient.get("active", True),
+        }
         for recipient in store.read()["recipients"].values()
         if recipient.get("user_id") == user["user_id"]
     ]

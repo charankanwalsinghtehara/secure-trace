@@ -35,6 +35,9 @@ def test_decrypt_watermark_and_verify_workflow(tmp_path) -> None:
     headers = {"Authorization": f"Bearer {auth['access_token']}"}
     recipient_response = client.post("/api/v1/recipients", json={"name": "Ada Recipient"}, headers=headers)
     recipient = recipient_response.json()
+    recipients = client.get("/api/v1/recipients", headers=headers)
+    assert recipients.status_code == 200
+    assert recipients.json()[0]["active"] is True
     document = client.post(
         "/api/v1/documents",
         json={"name": "brief.txt", "content_base64": base64.b64encode(b"classified brief").decode("ascii")},
@@ -81,3 +84,51 @@ def test_decrypt_watermark_and_verify_workflow(tmp_path) -> None:
         headers=headers,
     )
     assert blocked.status_code == 403
+
+
+def test_local_llm_analysis_is_audited(tmp_path, monkeypatch) -> None:
+    main.store = JsonStore(str(tmp_path / "metadata.json"))
+    main.ledger = LocalLedger(str(tmp_path / "ledger.jsonl"))
+    client = TestClient(app)
+    auth = client.post("/api/v1/auth/register", json={"email": "analyst@example.test", "password": "correct horse battery"}).json()
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+    document = client.post(
+        "/api/v1/documents",
+        json={"name": "brief.txt", "content_base64": base64.b64encode(b"classified analysis text").decode("ascii")},
+        headers=headers,
+    ).json()
+    monkeypatch.setattr(main.llm, "analyze", lambda text, name: '{"classification":"restricted","summary":"Local result"}')
+
+    response = client.post(f"/api/v1/documents/{document['document_id']}/analyze", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["result"] == '{"classification":"restricted","summary":"Local result"}'
+    assert response.json()["transaction_id"]
+    assert main.store.read()["analyses"][0]["analysis_hash"] == response.json()["analysis_hash"]
+
+
+def test_legacy_recipients_without_active_flag_are_filtered_gracefully(tmp_path) -> None:
+    main.store = JsonStore(str(tmp_path / "metadata.json"))
+    main.ledger = LocalLedger(str(tmp_path / "ledger.jsonl"))
+    client = TestClient(app)
+    auth = client.post("/api/v1/auth/register", json={"email": "legacy@example.test", "password": "correct horse battery"}).json()
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+    main.store.update(
+        lambda data: data["recipients"].update(
+            {
+                "legacy-id": {
+                    "recipient_id": "legacy-id",
+                    "name": "Legacy",
+                    "user_id": auth["user"]["user_id"],
+                    "algorithm": "DEMO-HMAC-SHA256 (REPLACE WITH ML-DSA-65)",
+                    "public_key": "abc",
+                }
+            }
+        )
+    )
+
+    response = client.get("/api/v1/recipients", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["active"] is True

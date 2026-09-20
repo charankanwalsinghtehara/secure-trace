@@ -16,7 +16,7 @@ class JsonStore:
         self.lock = Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
-            self._write({"users": {}, "recipients": {}, "documents": {}, "events": {}, "messages": []})
+            self._write({"users": {}, "recipients": {}, "documents": {}, "events": {}, "messages": [], "analyses": []})
 
     def _read(self) -> dict[str, Any]:
         return json.loads(self.path.read_text(encoding="utf-8"))
@@ -34,6 +34,7 @@ class JsonStore:
             value.setdefault("documents", {})
             value.setdefault("events", {})
             value.setdefault("messages", [])
+            value.setdefault("analyses", [])
             return value
 
     def update(self, callback: Any) -> dict[str, Any]:
@@ -44,6 +45,7 @@ class JsonStore:
             value.setdefault("documents", {})
             value.setdefault("events", {})
             value.setdefault("messages", [])
+            value.setdefault("analyses", [])
             callback(value)
             self._write(value)
             return value
