@@ -21,8 +21,8 @@ services:
       - key: CRYPTATRACE_LLM_TIMEOUT
         value: "90"
 
-  - type: static
-    name: securetrace-web
+staticSites:
+  - name: securetrace-web
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
