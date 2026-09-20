@@ -20,15 +20,12 @@ services:
         value: llama3.2
       - key: CRYPTATRACE_LLM_TIMEOUT
         value: "90"
-  - type: static
+  - type: web
     name: securetrace-web
+    runtime: node
     rootDir: frontend
     buildCommand: npm install && npm run build
-    staticPublishPath: dist
+    startCommand: npx serve -s dist -l $PORT
     envVars:
       - key: VITE_API_URL
         value: https://securetrace-api.onrender.com
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
